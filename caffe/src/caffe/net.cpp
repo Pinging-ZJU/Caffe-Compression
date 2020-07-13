@@ -18,6 +18,7 @@
 #include "caffe/util/insert_splits.hpp"
 #include "caffe/util/math_functions.hpp"
 #include "caffe/util/upgrade_proto.hpp"
+#include "caffe/syncedmem.hpp"
 
 namespace caffe {
 
@@ -527,10 +528,22 @@ Dtype Net<Dtype>::ForwardFromTo(int start, int end) {
     for (int c = 0; c < before_forward_.size(); ++c) {
       before_forward_[c]->run(i);
     }
+
+    // bottom_vecs_：传入的数据；top_vecs_：传出数据
+    /*
+       对卷积层进行处理：需要将卷积层的名字设置为convolutionx
+    */
+    if (layer_names_[i][0] == 'c' && layer_names_[i][10] == 'n')
+    {
+        //printf("Layer name is :  %s, enter func\n", &layer_names_[i][0]);
+        ////////
+        bottom_vecs_[i][0]->async_gpu2cpu();
+    }
     Dtype layer_loss = layers_[i]->Forward(bottom_vecs_[i], top_vecs_[i]);
+    // 同步等待
+    cudaDeviceSynchronize();
     loss += layer_loss;
 
-    //printf("%d   ", debug_info_);
     if (sparsity_info_) {
         if (ReluRecordFlag) {
             if (layer_names_[i][0] == 'r' || layer_names_[i][0] == 'p')
@@ -590,11 +603,21 @@ void Net<Dtype>::BackwardFromTo(int start, int end) {
     for (int c = 0; c < before_backward_.size(); ++c) {
       before_backward_[c]->run(i);
     }
+    /*
+        后向传播转出数据
+    */
+    if (layer_names_[i][0] == 'c' && layer_names_[i][10] == 'n')
+    {
+        //printf("Layer name is :  %s, enter func\n", &layer_names_[i][0]);
+        bottom_vecs_[i][0]->async_cpu2gpu();
+    }
     if (layer_need_backward_[i]) {
       layers_[i]->Backward(
           top_vecs_[i], bottom_need_backward_[i], bottom_vecs_[i]);
+
       if (debug_info_) { BackwardDebugInfo(i); }
     }
+    cudaDeviceSynchronize();
     for (int c = 0; c < after_backward_.size(); ++c) {
       after_backward_[c]->run(i);
     }

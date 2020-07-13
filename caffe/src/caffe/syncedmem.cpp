@@ -1,6 +1,8 @@
 #include "caffe/common.hpp"
 #include "caffe/syncedmem.hpp"
 #include "caffe/util/math_functions.hpp"
+#include <unistd.h>
+#include<sys/time.h>
 
 namespace caffe {
 SyncedMemory::SyncedMemory()
@@ -88,6 +90,64 @@ inline void SyncedMemory::to_gpu() {
 #else
   NO_GPU;
 #endif
+}
+
+const void* SyncedMemory::Sleep(int ms)
+{
+    struct timeval delay;
+    delay.tv_sec = 0;
+    delay.tv_usec = ms * 1000; // 20 ms
+    select(0, NULL, NULL, NULL, &delay);
+}
+
+const double SyncedMemory::get_cur_time_ms() {
+    struct timeval   tv;
+    struct timezone  tz;
+    double cur_time;
+    gettimeofday(&tv, &tz);
+    cur_time = tv.tv_sec * 1000 + tv.tv_usec / 1000.0;
+    return cur_time;
+}
+
+// Cping-DIY 将GPU中数据异步转移至CPU
+const void* SyncedMemory::async_gpu2cpu(int size_) {
+    check_device();
+    cudaStream_t STREAM_GPU_to_CPU_;
+    cudaStreamCreate(&STREAM_GPU_to_CPU_);
+    const cudaMemcpyKind put = cudaMemcpyDeviceToHost;
+#ifndef CPU_ONLY
+    if (gpu_ptr_ != NULL && cpu_ptr_ == NULL) {
+        CaffeMallocHost(&cpu_ptr_, size_ * 4, &cpu_malloc_use_cuda_);
+        own_cpu_data_ = true;
+    }
+    int deley = ceil(float(size_ * 4) / 1024 / 1024 / 24);
+    
+    
+    //CUDA_CHECK(cudaMemcpyAsync(cpu_ptr_, gpu_ptr_, size_ * 4, put, STREAM_GPU_to_CPU_));
+    //double t1 = get_cur_time_ms();
+    Sleep(deley);
+    CUDA_CHECK(cudaMemcpyAsync(cpu_ptr_, gpu_ptr_, size_ * 4, put, STREAM_GPU_to_CPU_));
+    //double t2 = get_cur_time_ms();
+    
+    //printf("Size %f mb -- delay time is %lf\n",  float(size_)*4 /1024/1024, t2 - t1);
+    head_ = SYNCED;
+#else
+    NO_GPU;
+#endif
+    return (const void*)gpu_ptr_;
+}
+
+// Cping-DIY 将CPU中数据异步转移至GPU
+const void* SyncedMemory::async_cpu2gpu(int size_) {
+    check_device();
+    cudaStream_t STREAM_CPU_to_GPU_;
+    cudaStreamCreate(&STREAM_CPU_to_GPU_);
+    const cudaMemcpyKind put = cudaMemcpyHostToDevice;
+    int deley = ceil(float(size_ * 4) / 1024 / 1024 / 24);
+    Sleep(deley);
+    CUDA_CHECK(cudaMemcpyAsync(gpu_ptr_, cpu_ptr_, size_ * 4, put, STREAM_CPU_to_GPU_));
+    //printf("Size %f mb \n", float(size_) * 4 / 1024 / 1024);
+    return (const void*)cpu_ptr_;
 }
 
 const void* SyncedMemory::cpu_data() {

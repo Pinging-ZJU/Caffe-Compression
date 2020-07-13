@@ -24,4 +24,4 @@ snapshot_prefix: "examples/cifar10/cifar10_quick"
 # solver mode: CPU or GPU
 solver_mode: GPU
 #debug_info: true
-sparsity_info:true
+#sparsity_info:true

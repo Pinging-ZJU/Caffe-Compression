@@ -325,9 +325,19 @@ int test() {
 }
 RegisterBrewFunction(test);
 
+const double get_cur_time_ms() {
+    struct timeval   tv;
+    struct timezone  tz;
+    double cur_time;
+    gettimeofday(&tv, &tz);
+    cur_time = tv.tv_sec * 1000 + tv.tv_usec / 1000.0;
+    return cur_time;
+}
+
 
 // Time: benchmark the execution time of a model.
 int time() {
+
   CHECK_GT(FLAGS_model.size(), 0) << "Need a model definition to time.";
   caffe::Phase phase = get_phase_from_flags(caffe::TRAIN);
   vector<string> stages = get_stages_from_flags();
@@ -418,6 +428,7 @@ int time() {
 RegisterBrewFunction(time);
 
 int main(int argc, char** argv) {
+  //double t1 = get_cur_time_ms();
   // Print output to stderr (while still logging).
   FLAGS_alsologtostderr = 1;
   // Set version
@@ -446,4 +457,7 @@ int main(int argc, char** argv) {
   } else {
     gflags::ShowUsageWithFlagsRestrict(argv[0], "tools/caffe");
   }
+  //cudaDeviceSynchronize();
+  //double t2 = get_cur_time_ms();
+  //printf("All time is:  %lf", t2 - t1);
 }

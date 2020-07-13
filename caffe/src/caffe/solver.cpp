@@ -9,7 +9,7 @@
 #include "caffe/util/hdf5.hpp"
 #include "caffe/util/io.hpp"
 #include "caffe/util/upgrade_proto.hpp"
-
+#include<sys/time.h>
 namespace caffe {
 
 template<typename Dtype>
@@ -197,6 +197,16 @@ void Solver<Dtype>::InitTestNets() {
     }
   }
 }
+template <typename Dtype>
+double Solver<Dtype>::get_cur_time_ms() {
+    struct timeval   tv;
+    struct timezone  tz;
+    double cur_time;
+    gettimeofday(&tv, &tz);
+    cur_time = tv.tv_sec * 1000 + tv.tv_usec / 1000.0;
+    return cur_time;
+}
+
 
 template <typename Dtype>
 void Solver<Dtype>::Step(int iters) {
@@ -229,9 +239,14 @@ void Solver<Dtype>::Step(int iters) {
     net_->set_sparsity_info(display && param_.sparsity_info());
     // accumulate the loss and gradient
     Dtype loss = 0;
+    double t1 = get_cur_time_ms();
     for (int i = 0; i < param_.iter_size(); ++i) {
       loss += net_->ForwardBackward();
     }
+    double t2 = get_cur_time_ms();
+    printf("*****************************************************");
+    printf("The %d iteration time spend is :  %lf\n", param_.iter_size(), t2 - t1);
+    printf("*****************************************************");
     loss /= param_.iter_size();
     // average the loss across iterations for smoothed reporting
     UpdateSmoothedLoss(loss, start_iter, average_loss);

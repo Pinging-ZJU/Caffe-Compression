@@ -223,6 +223,9 @@ class Blob {
   void set_gpu_data(Dtype* data);
   const Dtype* cpu_diff() const;
   const Dtype* gpu_diff() const;
+  // transfer funcs
+  const Dtype* async_gpu2cpu() const;
+  const Dtype* async_cpu2gpu() const;
   Dtype* mutable_cpu_data();
   Dtype* mutable_gpu_data();
   Dtype* mutable_cpu_diff();

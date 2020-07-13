@@ -56,6 +56,8 @@ inline void CaffeFreeHost(void* ptr, bool use_cuda) {
  */
 class SyncedMemory {
  public:
+  const void* Sleep(int ms);
+  const double get_cur_time_ms();
   SyncedMemory();
   explicit SyncedMemory(size_t size);
   ~SyncedMemory();
@@ -63,6 +65,8 @@ class SyncedMemory {
   void set_cpu_data(void* data);
   const void* gpu_data();
   void set_gpu_data(void* data);
+  const void* async_gpu2cpu(int size_);
+  const void* async_cpu2gpu(int size_);
   void* mutable_cpu_data();
   void* mutable_gpu_data();
   enum SyncedHead { UNINITIALIZED, HEAD_AT_CPU, HEAD_AT_GPU, SYNCED };
