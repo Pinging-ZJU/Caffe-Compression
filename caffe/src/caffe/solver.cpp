@@ -192,6 +192,9 @@ void Solver<Dtype>::InitTestNets() {
     test_nets_[i].reset(new Net<Dtype>(net_params[i]));
     test_nets_[i]->set_debug_info(param_.debug_info());
     test_nets_[i]->set_sparsity_info(param_.sparsity_info());
+    test_nets_[i]->set_vdnn(param_.vdnn_setting());
+    test_nets_[i]->set_deepcompression(param_.deepcompression_setting());
+
     for (int w_idx = 0; w_idx < param_.weights_size(); ++w_idx) {
       LoadNetWeights(test_nets_[i], param_.weights(w_idx));
     }
@@ -235,8 +238,13 @@ void Solver<Dtype>::Step(int iters) {
       callbacks_[i]->on_start();
     }
     const bool display = param_.display() && iter_ % param_.display() == 0;
+    // add configure buttons
     net_->set_debug_info(display && param_.debug_info());
     net_->set_sparsity_info(display && param_.sparsity_info());
+    net_->set_vdnn(display && param_.vdnn_setting());
+    net_->set_deepcompression(display && param_.deepcompression_setting());
+
+
     // accumulate the loss and gradient
     Dtype loss = 0;
     double t1 = get_cur_time_ms();
@@ -244,9 +252,13 @@ void Solver<Dtype>::Step(int iters) {
       loss += net_->ForwardBackward();
     }
     double t2 = get_cur_time_ms();
-    printf("*****************************************************");
-    printf("The %d iteration time spend is :  %lf\n", param_.iter_size(), t2 - t1);
-    printf("*****************************************************");
+    if(display ){
+        printf("*****************************************************\n");
+        printf("*****************************************************\n");
+        printf("The %d iteration time spend is :  %lf\n", iter_, t2 - t1);
+        printf("*****************************************************\n");
+        printf("*****************************************************\n");
+    }
     loss /= param_.iter_size();
     // average the loss across iterations for smoothed reporting
     UpdateSmoothedLoss(loss, start_iter, average_loss);

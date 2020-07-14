@@ -217,6 +217,9 @@ class Net {
   void set_debug_info(const bool value) { debug_info_ = value; }
   // set sparsity info
   void set_sparsity_info(const bool value) { sparsity_info_ = value; }
+
+  void set_vdnn(const bool value) { vdnn_setting_ = value; }
+  void set_deepcompression(const bool value) { deepcompression_setting_ = value; }
   // Helpers for Init.
   /**
    * @brief Remove layers that the user specified should be excluded given the current
@@ -335,6 +338,8 @@ class Net {
   /// Whether to compute and display debug info for the net.
   bool debug_info_;
   bool sparsity_info_;
+  bool vdnn_setting_;
+  bool deepcompression_setting_;
   // Callbacks
   vector<Callback*> before_forward_;
   vector<Callback*> after_forward_;

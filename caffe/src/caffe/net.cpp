@@ -256,6 +256,8 @@ void Net<Dtype>::Init(const NetParameter& in_param) {
   ShareWeights();
   debug_info_ = param.debug_info();
   sparsity_info_ = param.sparsity_info();
+  vdnn_setting_ = param.vdnn_setting();
+  deepcompression_setting_ = param.deepcompression_setting();
   LOG_IF(INFO, Caffe::root_solver()) << "Network initialization done.";
 }
 
@@ -533,15 +535,20 @@ Dtype Net<Dtype>::ForwardFromTo(int start, int end) {
     /*
        对卷积层进行处理：需要将卷积层的名字设置为convolutionx
     */
-    if (layer_names_[i][0] == 'c' && layer_names_[i][10] == 'n')
-    {
-        //printf("Layer name is :  %s, enter func\n", &layer_names_[i][0]);
-        ////////
-        bottom_vecs_[i][0]->async_gpu2cpu();
+
+    if (vdnn_setting_) {
+        if (layer_names_[i][0] == 'c' && layer_names_[i][10] == 'n')
+        {
+            //printf("Layer name is :  %s, enter func\n", &layer_names_[i][0]);
+            ////////
+            bottom_vecs_[i][0]->async_gpu2cpu();
+        }
     }
-    Dtype layer_loss = layers_[i]->Forward(bottom_vecs_[i], top_vecs_[i]);
-    // 同步等待
-    cudaDeviceSynchronize();
+        Dtype layer_loss = layers_[i]->Forward(bottom_vecs_[i], top_vecs_[i]);
+        // 同步等待
+    if (vdnn_setting_) {
+        cudaDeviceSynchronize();
+    }
     loss += layer_loss;
 
     if (sparsity_info_) {
@@ -606,10 +613,12 @@ void Net<Dtype>::BackwardFromTo(int start, int end) {
     /*
         后向传播转出数据
     */
-    if (layer_names_[i][0] == 'c' && layer_names_[i][10] == 'n')
-    {
-        //printf("Layer name is :  %s, enter func\n", &layer_names_[i][0]);
-        bottom_vecs_[i][0]->async_cpu2gpu();
+    if (vdnn_setting_) {
+        if (layer_names_[i][0] == 'c' && layer_names_[i][10] == 'n')
+        {
+            //printf("Layer name is :  %s, enter func\n", &layer_names_[i][0]);
+            bottom_vecs_[i][0]->async_cpu2gpu();
+        }
     }
     if (layer_need_backward_[i]) {
       layers_[i]->Backward(
@@ -617,7 +626,9 @@ void Net<Dtype>::BackwardFromTo(int start, int end) {
 
       if (debug_info_) { BackwardDebugInfo(i); }
     }
-    cudaDeviceSynchronize();
+    if (vdnn_setting_) {
+        cudaDeviceSynchronize();
+    }
     for (int c = 0; c < after_backward_.size(); ++c) {
       after_backward_[c]->run(i);
     }

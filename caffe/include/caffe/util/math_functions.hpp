@@ -12,6 +12,8 @@
 
 namespace caffe {
 
+
+
 // Caffe gemm provides a simpler interface to the gemm functions, with the
 // limitation that the data has to be contiguous in memory.
 template <typename Dtype>
@@ -146,6 +148,17 @@ template <typename Dtype>
 void caffe_cpu_scale(const int n, const Dtype alpha, const Dtype *x, Dtype* y);
 
 #ifndef CPU_ONLY  // GPU
+
+/*
+    Ñ¹ËõÄ£¿éº¯Êý
+*/
+template <typename Dtype>
+void caffe_sparsity_compression(float* arrayGPU, float* arrayCPU, float* compressedList, int* valueIndex, int* gpucompressedValueIndex, int* cpucompressedValueIndex,
+    int gridsize, int blocksize, int tensor_size, int* gpucompressedSize, int* cpucompressedSize, int* CPUBinIndex, uint32_t* GPUBinIndex);
+
+template <typename Dtype>
+void caffe_sparsity_decompression(float* arrayGPU, float* arrayCPU, float* compressedList, int* gpucompressedValueIndex,
+    int gridsize, int blocksize, int tensor_size, int* gpucompressedSize, int* cpucompressedSize, uint32_t* GPUBinIndex);
 
 // Decaf gpu gemm provides an interface that is almost the same as the cpu
 // gemm function - following the c convention and calling the fortran-order
