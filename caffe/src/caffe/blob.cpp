@@ -80,6 +80,12 @@ const int* Blob<Dtype>::gpu_shape() const {
   return (const int*)shape_data_->gpu_data();
 }
 
+template <typename Dtype>
+const Dtype* Blob<Dtype>::gpufree() const {
+    return (const Dtype*)data_->gpufree();
+}
+
+
 // call async_gpu2cpu() in "syncedmem"
 template <typename Dtype>
 const Dtype* Blob<Dtype>::async_gpu2cpu() const {
@@ -94,6 +100,26 @@ const Dtype* Blob<Dtype>::async_cpu2gpu() const {
     CHECK(data_);
     int size = count();
     return (const Dtype*)data_->async_cpu2gpu(size);
+}
+
+template <typename Dtype>
+const Dtype* Blob<Dtype>::compression() const {
+    CHECK(data_);
+    int size = count();
+    return (const Dtype*)data_->compression(size);
+}
+
+template <typename Dtype>
+const Dtype* Blob<Dtype>::decompression_cpu2gpu_asyc_transfer() const {
+    return (const Dtype*)data_->decompression_cpu2gpu_asyc_transfer();
+}
+
+
+template <typename Dtype>
+const Dtype* Blob<Dtype>::decompression() const {
+    CHECK(data_);
+    int size = count();
+    return (const Dtype*)data_->decompression(size);
 }
 
 template <typename Dtype>

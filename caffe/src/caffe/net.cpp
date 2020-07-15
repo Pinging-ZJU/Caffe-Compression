@@ -540,14 +540,17 @@ Dtype Net<Dtype>::ForwardFromTo(int start, int end) {
         if (layer_names_[i][0] == 'c' && layer_names_[i][10] == 'n')
         {
             //printf("Layer name is :  %s, enter func\n", &layer_names_[i][0]);
-            ////////
-            bottom_vecs_[i][0]->async_gpu2cpu();
+            if (deepcompression_setting_)
+                bottom_vecs_[i][0]->compression();
+            else
+                bottom_vecs_[i][0]->async_gpu2cpu();
         }
     }
         Dtype layer_loss = layers_[i]->Forward(bottom_vecs_[i], top_vecs_[i]);
         // 同步等待
     if (vdnn_setting_) {
         cudaDeviceSynchronize();
+        //bottom_vecs_[i][0]->gpufree();
     }
     loss += layer_loss;
 
@@ -567,6 +570,7 @@ Dtype Net<Dtype>::ForwardFromTo(int start, int end) {
       after_forward_[c]->run(i);
     }
   }
+  
   return loss;
 }
 
@@ -614,10 +618,15 @@ void Net<Dtype>::BackwardFromTo(int start, int end) {
         后向传播转出数据
     */
     if (vdnn_setting_) {
-        if (layer_names_[i][0] == 'c' && layer_names_[i][10] == 'n')
-        {
-            //printf("Layer name is :  %s, enter func\n", &layer_names_[i][0]);
-            bottom_vecs_[i][0]->async_cpu2gpu();
+        if(i>=1){
+            if (layer_names_[i-1][0] == 'c' && layer_names_[i-1][10] == 'n')
+            {
+                //printf("Layer name is : %d  %s  %s size is %d, enter func\n",i, &layer_names_[i][0], &layer_names_[i-1][0], bottom_vecs_[i - 1][0]->count()*4/1024/1024);
+                if (deepcompression_setting_)
+                    bottom_vecs_[i - 1][0]->decompression_cpu2gpu_asyc_transfer();
+                else
+                    bottom_vecs_[i-1][0]->async_cpu2gpu();
+            }
         }
     }
     if (layer_need_backward_[i]) {
@@ -632,6 +641,18 @@ void Net<Dtype>::BackwardFromTo(int start, int end) {
     for (int c = 0; c < after_backward_.size(); ++c) {
       after_backward_[c]->run(i);
     }
+
+    if (vdnn_setting_) {
+        if (i >= 1) {
+            if (layer_names_[i - 1][0] == 'c' && layer_names_[i - 1][10] == 'n')
+            {
+                if (deepcompression_setting_)
+                    bottom_vecs_[i - 1][0]->decompression();
+            }
+        }
+    }
+
+
   }
 }
 template <typename Dtype>

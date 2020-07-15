@@ -224,8 +224,12 @@ class Blob {
   const Dtype* cpu_diff() const;
   const Dtype* gpu_diff() const;
   // transfer funcs
+  const Dtype* gpufree() const;
   const Dtype* async_gpu2cpu() const;
   const Dtype* async_cpu2gpu() const;
+  const Dtype* compression() const;
+  const Dtype* decompression() const;
+  const Dtype* decompression_cpu2gpu_asyc_transfer() const;
   Dtype* mutable_cpu_data();
   Dtype* mutable_gpu_data();
   Dtype* mutable_cpu_diff();

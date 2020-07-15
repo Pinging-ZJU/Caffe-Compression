@@ -4,6 +4,7 @@
 #include <unistd.h>
 #include<sys/time.h>
 
+
 namespace caffe {
 SyncedMemory::SyncedMemory()
   : cpu_ptr_(NULL), gpu_ptr_(NULL), size_(0), head_(UNINITIALIZED),
@@ -98,15 +99,21 @@ const void* SyncedMemory::Sleep(int ms)
     delay.tv_sec = 0;
     delay.tv_usec = ms * 1000; // 20 ms
     select(0, NULL, NULL, NULL, &delay);
+    return (const void*)gpu_ptr_;
 }
 
-const double SyncedMemory::get_cur_time_ms() {
+double SyncedMemory::get_cur_time_ms() {
     struct timeval   tv;
     struct timezone  tz;
     double cur_time;
     gettimeofday(&tv, &tz);
     cur_time = tv.tv_sec * 1000 + tv.tv_usec / 1000.0;
     return cur_time;
+}
+
+
+const void* SyncedMemory::gpufree() {
+    cudaFree(gpu_ptr_);
 }
 
 // Cping-DIY 将GPU中数据异步转移至CPU
@@ -116,6 +123,7 @@ const void* SyncedMemory::async_gpu2cpu(int size_) {
     cudaStreamCreate(&STREAM_GPU_to_CPU_);
     const cudaMemcpyKind put = cudaMemcpyDeviceToHost;
 #ifndef CPU_ONLY
+
     if (gpu_ptr_ != NULL && cpu_ptr_ == NULL) {
         CaffeMallocHost(&cpu_ptr_, size_ * 4, &cpu_malloc_use_cuda_);
         own_cpu_data_ = true;
@@ -134,6 +142,7 @@ const void* SyncedMemory::async_gpu2cpu(int size_) {
 #else
     NO_GPU;
 #endif
+    
     return (const void*)gpu_ptr_;
 }
 
@@ -149,6 +158,72 @@ const void* SyncedMemory::async_cpu2gpu(int size_) {
     //printf("Size %f mb \n", float(size_) * 4 / 1024 / 1024);
     return (const void*)cpu_ptr_;
 }
+
+/*
+    compression and decompression function location
+*/
+const void* SyncedMemory::compression(int size_) {
+    //check_device();
+    int gridsize = 64;
+    int blocksize = 128;
+#ifndef CPU_ONLY
+
+    if (gpu_ptr_ != NULL && cpu_ptr_ == NULL) {
+        CaffeMallocHost(&cpu_ptr_, size_ * sizeof(float), &cpu_malloc_use_cuda_);
+        own_cpu_data_ = true;
+    }
+    head_ = SYNCED;
+#else
+    NO_GPU;
+#endif
+
+    if (!compression_flag) {
+        // 可定制，暂时先这么设计
+        int process = gridsize * blocksize;
+        // 每个参数只分配一次空间，后面沿用即可
+        cudaMalloc((void**)&valueIndex, sizeof(int) * process);
+        cudaMalloc((void**)&gpucompressedValueIndex, sizeof(int) * process);
+        cudaMalloc((void**)&gpucompressedSize, sizeof(int) * 1);
+        cudaMallocHost(&cpucompressedSize, sizeof(int) * 1);
+        compression_flag = true;
+    }
+    caffe::caffe_sparsity_compression((float*)gpu_ptr_, (float*)cpu_ptr_, &compressedList, valueIndex, gpucompressedValueIndex,
+        gridsize, blocksize, size_, gpucompressedSize, cpucompressedSize, &GPUBinIndex);
+
+    // 将压缩后的数据转移至CPU中，并释放相关中间值
+    cudaStream_t STREAM_GPU_to_CPU_;
+    cudaStreamCreate(&STREAM_GPU_to_CPU_);
+    //printf("------------------------------Data size is : %d  %d   ratio is %f-----------------------------------\n", cpucompressedSize[0], size_, float(cpucompressedSize[0])/float(size_) *100);
+    int deley = ceil(float(cpucompressedSize[0] * 4) / 1024 / 1024 / 24);
+    Sleep(deley);
+    CUDA_CHECK(cudaMemcpyAsync((float*)cpu_ptr_, (float*)compressedList, sizeof(float) * cpucompressedSize[0], cudaMemcpyDeviceToHost, STREAM_GPU_to_CPU_));
+    //cudaFree(compressedList);
+    return (const void*)gpu_ptr_;
+}
+/*
+    decompression function
+*/
+const void* SyncedMemory::decompression(int size_) {
+    //check_device();
+    int gridsize = 64;
+    int blocksize = 128;
+    //cudaMalloc((void**)&compressedList, cpucompressedSize[0] * sizeof(float));
+    caffe::caffe_sparsity_decompression((float*)gpu_ptr_, (float*)cpu_ptr_, compressedList, gpucompressedValueIndex,
+        gridsize, blocksize, size_, cpucompressedSize, GPUBinIndex);
+    return (const void*)gpu_ptr_;
+}
+
+const void* SyncedMemory::decompression_cpu2gpu_asyc_transfer() {
+    cudaStream_t STREAM_CPU_to_GPU_;
+    cudaStreamCreate(&STREAM_CPU_to_GPU_);
+    // 将CPU数据转移到GPU中
+    int deley = ceil(float(cpucompressedSize[0] * 4) / 1024 / 1024 / 24);
+    Sleep(deley);
+    CUDA_CHECK(cudaMemcpyAsync((float*)compressedList, (float*)cpu_ptr_, sizeof(float) * cpucompressedSize[0], cudaMemcpyHostToDevice, STREAM_CPU_to_GPU_));
+    return (const void*)gpu_ptr_;
+}
+
+
 
 const void* SyncedMemory::cpu_data() {
   check_device();

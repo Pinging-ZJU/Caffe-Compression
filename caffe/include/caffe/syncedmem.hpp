@@ -2,7 +2,8 @@
 #define CAFFE_SYNCEDMEM_HPP_
 
 #include <cstdlib>
-
+#include <stdlib.h>
+#include <stdint.h>
 #ifdef USE_MKL
   #include "mkl.h"
 #endif
@@ -56,8 +57,9 @@ inline void CaffeFreeHost(void* ptr, bool use_cuda) {
  */
 class SyncedMemory {
  public:
+  
   const void* Sleep(int ms);
-  const double get_cur_time_ms();
+  double get_cur_time_ms();
   SyncedMemory();
   explicit SyncedMemory(size_t size);
   ~SyncedMemory();
@@ -65,8 +67,13 @@ class SyncedMemory {
   void set_cpu_data(void* data);
   const void* gpu_data();
   void set_gpu_data(void* data);
+  const void* gpufree();
   const void* async_gpu2cpu(int size_);
   const void* async_cpu2gpu(int size_);
+  const void* compression(int size_);
+  const void* decompression(int size_);
+  const void* decompression_cpu2gpu_asyc_transfer();
+
   void* mutable_cpu_data();
   void* mutable_gpu_data();
   enum SyncedHead { UNINITIALIZED, HEAD_AT_CPU, HEAD_AT_GPU, SYNCED };
@@ -84,6 +91,25 @@ class SyncedMemory {
   void to_gpu();
   void* cpu_ptr_;
   void* gpu_ptr_;
+
+
+
+  // Compression project
+  // store compressed data
+  float* compressedList;
+  // ***** for configure
+  float* cpucompressedList;
+  // pre_compression needs
+  int* valueIndex;
+  // process index
+  int* gpucompressedValueIndex;
+  // cpu & gpu tensor size after compression
+  int* gpucompressedSize;
+  int* cpucompressedSize;
+  // data index
+  uint32_t* GPUBinIndex;
+  bool compression_flag = false;
+
   size_t size_;
   SyncedHead head_;
   bool own_cpu_data_;

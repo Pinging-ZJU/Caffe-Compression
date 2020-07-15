@@ -550,22 +550,26 @@ __global__ void compression(int arraySize, int kernelSize, float arrayGPU[], flo
 // valueIndex & gpucompressedValueIndex need to be transfered into this function, to reduce the malloc times
 // parameters: tensor gpu pointer / tensor cpu pointer / "pre_compression" process index needed / "compression_array_size" process index
 // / gridsize / blocksize / tensor size / compressed tensor's size(gpu) / compressed tensor's size(cpu) / CPU 32 index
-void caffe_sparsity_compression(float* arrayGPU, float* arrayCPU, float *compressedList, int* valueIndex, int* gpucompressedValueIndex, int* cpucompressedValueIndex,
- int gridsize, int blocksize, int tensor_size, int* gpucompressedSize, int* cpucompressedSize, int* CPUBinIndex, uint32_t* GPUBinIndex) {
+// void caffe_sparsity_compression(float* arrayGPU, float* arrayCPU, float *compressedList, int* valueIndex, int* gpucompressedValueIndex, int* cpucompressedValueIndex,
+//  int gridsize, int blocksize, int tensor_size, int* gpucompressedSize, int* cpucompressedSize, uint32_t* CPUBinIndex, uint32_t* GPUBinIndex) {
+
+void caffe_sparsity_compression(float* arrayGPU, float* arrayCPU, float **compressedList, int* valueIndex, int* gpucompressedValueIndex,
+ int gridsize, int blocksize, int tensor_size, int* gpucompressedSize, int* cpucompressedSize, uint32_t** GPUBinIndex) {
   int process = gridsize * blocksize;
 
-  pre_compression<<<gridsize, blocksize>>>(tensor_size, process, arrayGPU, valueIndex);
-  compression_array_size<<<1, 1>>>(valueIndex, process, gpucompressedSize, gpucompressedValueIndex);
+  dim3 dimGrid(gridsize);
+  dim3 dimBlock(blocksize);
 
+  pre_compression<<<dimGrid, dimBlock>>>(tensor_size, process, arrayGPU, valueIndex);
+  compression_array_size<<<1, 1>>>(valueIndex, process, gpucompressedSize, gpucompressedValueIndex);
   cudaMemcpy((void*) cpucompressedSize, (void*) gpucompressedSize, sizeof(int) * 1, cudaMemcpyDeviceToHost);
-  
-  cudaMalloc((void**)&compressedList, cpucompressedSize[0] * sizeof(float));
-  
+
+  cudaMalloc((void**)compressedList, cpucompressedSize[0] * sizeof(float));
+
   int IndexCount = ceil(ceil(tensor_size / process) / 32) * process;
   // 必须在这里定义，IndexCount不能提前知道
-  cudaMalloc((void**)&GPUBinIndex, sizeof(int) * IndexCount);
-  compression<<<gridsize, blocksize>>>(tensor_size, process, arrayGPU, compressedList, gpucompressedValueIndex, GPUBinIndex);
-  
+  cudaMalloc((void**)GPUBinIndex, sizeof(int) * IndexCount);
+  compression<<<dimGrid, dimBlock>>>(tensor_size, process, arrayGPU, *compressedList, gpucompressedValueIndex, *GPUBinIndex);
   // transfer 
   // cudaMemcpy((void*) arrayCPU, (void*) compressedList, sizeof(int) * cpucompressedSize[0], cudaMemcpyDeviceToHost);
   // GPU中的索引数据可以不用转出，因为数据量比较小
@@ -645,12 +649,14 @@ __global__ void decompression(float arrayGPU[], float destiGPU[], int arraySize,
 
 // 数据先从arrayCPU转移到compressedList（转移cpucompressedSize[0]个），之后处理转到arrayGPU
 void caffe_sparsity_decompression(float* arrayGPU, float* arrayCPU, float *compressedList, int* gpucompressedValueIndex,
-  int gridsize, int blocksize, int tensor_size, int* gpucompressedSize, int* cpucompressedSize, uint32_t* GPUBinIndex)
+  int gridsize, int blocksize, int tensor_size, int* cpucompressedSize, uint32_t* GPUBinIndex)
 {
 
+  dim3 dimGrid(gridsize);
+  dim3 dimBlock(blocksize);
   int process = gridsize * blocksize;
-  cudaMalloc((void**)&compressedList, cpucompressedSize[0] * sizeof(float));
-  decompression<<<gridsize, blocksize>>>(compressedList, arrayGPU, tensor_size, process, GPUBinIndex, gpucompressedValueIndex);
+  
+  decompression<<<dimGrid, dimBlock>>>(compressedList, arrayGPU, tensor_size, process, GPUBinIndex, gpucompressedValueIndex);
   cudaFree(compressedList);
 } 
 
