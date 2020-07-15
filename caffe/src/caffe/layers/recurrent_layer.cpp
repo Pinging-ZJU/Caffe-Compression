@@ -116,7 +116,10 @@ void RecurrentLayer<Dtype>::LayerSetUp(const vector<Blob<Dtype>*>& bottom,
   unrolled_net_->set_deepcompression(
       this->layer_param_.recurrent_param().deepcompression_setting());
 
-
+  unrolled_net_->set_dynamic(
+      this->layer_param_.recurrent_param().dynamic_setting());
+  unrolled_net_->set_backup(
+      this->layer_param_.recurrent_param().backup_setting());
 
   // Setup pointers to the inputs.
   x_input_blob_ = CHECK_NOTNULL(unrolled_net_->blob_by_name("x").get());

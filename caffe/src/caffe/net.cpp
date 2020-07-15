@@ -9,6 +9,7 @@
 #include "hdf5.h"
 #endif  // USE_HDF5
 
+
 #include "caffe/common.hpp"
 #include "caffe/layer.hpp"
 #include "caffe/net.hpp"
@@ -19,12 +20,26 @@
 #include "caffe/util/math_functions.hpp"
 #include "caffe/util/upgrade_proto.hpp"
 #include "caffe/syncedmem.hpp"
-
+#include<sys/time.h>
 namespace caffe {
 
+int Profile = 1;
+bool judgeFlag;
+// 装卷积层的个数
+int conv_count = 0;
 template <typename Dtype>
 Net<Dtype>::Net(const NetParameter& param) {
   Init(param);
+}
+
+template <typename Dtype>
+double Net<Dtype>::get_cur_time_ms() {
+    struct timeval   tv;
+    struct timezone  tz;
+    double cur_time;
+    gettimeofday(&tv, &tz);
+    cur_time = tv.tv_sec * 1000 + tv.tv_usec / 1000.0;
+    return cur_time;
 }
 
 template <typename Dtype>
@@ -258,6 +273,8 @@ void Net<Dtype>::Init(const NetParameter& in_param) {
   sparsity_info_ = param.sparsity_info();
   vdnn_setting_ = param.vdnn_setting();
   deepcompression_setting_ = param.deepcompression_setting();
+  dynamic_setting_ = param.dynamic_setting();
+  backup_setting_ = param.backup_setting();
   LOG_IF(INFO, Caffe::root_solver()) << "Network initialization done.";
 }
 
@@ -518,6 +535,12 @@ void Net<Dtype>::AppendParam(const NetParameter& param, const int layer_id,
   }
 }
 
+/*
+***************************************************************************
+***********************************CP-DIY**********************************
+***************************************************************************
+*/
+
 template <typename Dtype>
 Dtype Net<Dtype>::ForwardFromTo(int start, int end) {
   CHECK_GE(start, 0);
@@ -535,10 +558,11 @@ Dtype Net<Dtype>::ForwardFromTo(int start, int end) {
     /*
        对卷积层进行处理：需要将卷积层的名字设置为convolutionx
     */
-
+    double t0 = 0;
     if (vdnn_setting_) {
         if (layer_names_[i][0] == 'c' && layer_names_[i][10] == 'n')
-        {
+        {   
+            t0 = get_cur_time_ms();
             //printf("Layer name is :  %s, enter func\n", &layer_names_[i][0]);
             if (deepcompression_setting_)
                 bottom_vecs_[i][0]->compression();
@@ -546,10 +570,39 @@ Dtype Net<Dtype>::ForwardFromTo(int start, int end) {
                 bottom_vecs_[i][0]->async_gpu2cpu();
         }
     }
-        Dtype layer_loss = layers_[i]->Forward(bottom_vecs_[i], top_vecs_[i]);
+    Dtype layer_loss;
+    // 记录每一层的执行时间，且只记录一次
+    if(Profile){
+        cudaDeviceSynchronize();
+        double t1 = get_cur_time_ms();
+        layer_loss = layers_[i]->Forward(bottom_vecs_[i], top_vecs_[i]);
+        cudaDeviceSynchronize();
+        double t2 = get_cur_time_ms();
+        vector<float> v0;
+        v0.push_back(t2 - t1);
+        execute_time_.push_back(v0);
+        if (layer_names_[i][0] == 'c' && layer_names_[i][10] == 'n')
+        {
+            // 记录卷积层对应的layer id以及卷积层总量
+            SparsityRecord(i);
+            conv_number[conv_count] = i;
+            conv_count++;
+
+            
+        }
+        //printf("Layer %s %d execute time is :  %lf  %lf\n",&layer_names_[i][0],i, t2 - t1, execute_time_[i][0]);
+    }
+    else {
+        layer_loss = layers_[i]->Forward(bottom_vecs_[i], top_vecs_[i]);
+        //printf("Layer %s execute time is :  %lf\n", &layer_names_[i][0], execute_time_[i][0]);
+    }
         // 同步等待
     if (vdnn_setting_) {
         cudaDeviceSynchronize();
+        double t3 = get_cur_time_ms();
+
+        /*if (layer_names_[i][0] == 'c' && layer_names_[i][10] == 'n')
+            printf("Forward Layer %s vDNN or DeepC time needed is %lf ms\n", &layer_names_[i][0], t3 - t0);*/
         //bottom_vecs_[i][0]->gpufree();
     }
     loss += layer_loss;
@@ -570,9 +623,15 @@ Dtype Net<Dtype>::ForwardFromTo(int start, int end) {
       after_forward_[c]->run(i);
     }
   }
-  
+
   return loss;
 }
+
+/*
+***************************************************************************
+***********************************CP-DIY**********************************
+***************************************************************************
+*/
 
 template <typename Dtype>
 Dtype Net<Dtype>::ForwardFrom(int start) {
@@ -606,6 +665,12 @@ const vector<Blob<Dtype>*>& Net<Dtype>::Forward(
   return Forward(loss);
 }
 
+/*
+***************************************************************************
+***********************************CP-DIY**********************************
+***************************************************************************
+*/
+
 template <typename Dtype>
 void Net<Dtype>::BackwardFromTo(int start, int end) {
   CHECK_GE(end, 0);
@@ -617,10 +682,12 @@ void Net<Dtype>::BackwardFromTo(int start, int end) {
     /*
         后向传播转出数据
     */
+    double t0 = 0;
     if (vdnn_setting_) {
         if(i>=1){
             if (layer_names_[i-1][0] == 'c' && layer_names_[i-1][10] == 'n')
             {
+                t0 = get_cur_time_ms();
                 //printf("Layer name is : %d  %s  %s size is %d, enter func\n",i, &layer_names_[i][0], &layer_names_[i-1][0], bottom_vecs_[i - 1][0]->count()*4/1024/1024);
                 if (deepcompression_setting_)
                     bottom_vecs_[i - 1][0]->decompression_cpu2gpu_asyc_transfer();
@@ -629,14 +696,47 @@ void Net<Dtype>::BackwardFromTo(int start, int end) {
             }
         }
     }
-    if (layer_need_backward_[i]) {
-      layers_[i]->Backward(
-          top_vecs_[i], bottom_need_backward_[i], bottom_vecs_[i]);
+    //if (layer_need_backward_[i]) {
+    //  layers_[i]->Backward(
+    //      top_vecs_[i], bottom_need_backward_[i], bottom_vecs_[i]);
 
-      if (debug_info_) { BackwardDebugInfo(i); }
+    //  if (debug_info_) { BackwardDebugInfo(i); }
+    //}
+
+    // 记录每一层的执行时间，且只记录一次
+    if (Profile) {
+        cudaDeviceSynchronize();
+        double t1 = get_cur_time_ms();
+        layers_[i]->Backward(
+            top_vecs_[i], bottom_need_backward_[i], bottom_vecs_[i]);
+        cudaDeviceSynchronize();
+        double t2 = get_cur_time_ms();
+
+        execute_time_[i].push_back(t2-t1);
+
+        //printf("back Layer %s execute time is :  %lf  %lf\n", &layer_names_[i][0], t2 - t1, execute_time_[i][1]);
+        if (debug_info_) { BackwardDebugInfo(i); }
     }
+    else {
+        layers_[i]->Backward(
+            top_vecs_[i], bottom_need_backward_[i], bottom_vecs_[i]);
+
+        if (debug_info_) { BackwardDebugInfo(i); }
+        //printf("back Layer %s execute time is :  %lf\n", &layer_names_[i][0], execute_time_[i][1]);
+    }
+
+
+
     if (vdnn_setting_) {
         cudaDeviceSynchronize();
+        double t3 = get_cur_time_ms();
+        // 记录vdnn与deepcompression的延迟时间;稀疏度打印查看
+        /*if(i>=1)
+            if (layer_names_[i - 1][0] == 'c' && layer_names_[i - 1][10] == 'n')
+            {
+                printf("Layer %d sparisity is %f\n", i, sparisity_vec_[i-1]);
+                printf("Backward Layer %s vDNN or DeepC time needed is %lf ms\n", &layer_names_[i][0], t3 - t0);
+            }*/
     }
     for (int c = 0; c < after_backward_.size(); ++c) {
       after_backward_[c]->run(i);
@@ -654,7 +754,61 @@ void Net<Dtype>::BackwardFromTo(int start, int end) {
 
 
   }
+  
+  if (Profile) {
+      JudgeMode();
+  }
+  
+  Profile = 0;
 }
+
+
+// JudgeMode to decide whather to com/decom or not.
+//
+//
+//
+template <typename Dtype>
+bool Net<Dtype>::JudgeMode() {
+    for (int index = 0; index < conv_count; index++) {
+        // 当前卷积层的id
+        int cur_layer_id = conv_number[index];
+        float cur_layer_forward_time = execute_time_[cur_layer_id][0];
+        float cur_layer_backward_time = execute_time_[cur_layer_id][1];
+        float cur_layer_sparsity = sparisity_vec_[cur_layer_id];
+        float cur_layer_tensor_size = float(bottom_vecs_[cur_layer_id][0]->count());
+        float cur_layer_tensor_size_mb = cur_layer_tensor_size * 4 / 1024 / 1024;
+        float cur_layer_tensor_after_compressed_size_mb = cur_layer_tensor_size_mb * (1 - cur_layer_sparsity);
+        float deley_ori = ceil(cur_layer_tensor_size / 24);
+        float deley_compressed = ceil(cur_layer_tensor_after_compressed_size_mb / 24);
+        if (cur_layer_tensor_size / 12  < cur_layer_forward_time)
+        {
+            judge_ref[cur_layer_id] = false;
+            printf("layer id %d  judge consequence is %d  \n", cur_layer_id, judge_ref[cur_layer_id]);
+            break;
+        }
+        else {
+            // 压缩计算时间 + 压缩后数据转移时间 > 原数据转移时间 ->不转移
+            if (-0.195 * cur_layer_sparsity + 0.0317 * cur_layer_tensor_size_mb + 0.1244 + cur_layer_tensor_after_compressed_size_mb / 12 > cur_layer_tensor_size / 12 ) {
+                judge_ref[cur_layer_id] = false;
+                printf("layer id %d  judge consequence is %d  \n", cur_layer_id, judge_ref[cur_layer_id]);
+                break;
+            }
+        }
+        judge_ref[cur_layer_id] = true;
+        printf("layer id %d  judge consequence is %d  \n", cur_layer_id, judge_ref[cur_layer_id]);
+    }
+}
+
+template <typename Dtype>
+void Net<Dtype>::SparsityRecord(const int layer_id) {
+    int all = int(bottom_vecs_[layer_id][0]->count());
+    int zero = 0;
+    for (int i = 0; i< all; i++)
+        if (float(bottom_vecs_[layer_id][0]->cpu_data()[i]) == float(0))
+            zero++;
+    sparisity_vec_[layer_id]=(float(zero)/float(all));
+}
+
 template <typename Dtype>
 void Net<Dtype>::ForwardReluRecord(const int layer_id, int& reluFlag) {
     for (int top_id = 0; top_id < top_vecs_[layer_id].size(); ++top_id) {
@@ -675,7 +829,11 @@ void Net<Dtype>::ForwardReluRecord(const int layer_id, int& reluFlag) {
         }
     }
 }
-
+/*
+***************************************************************************
+***********************************CP-DIY**********************************
+***************************************************************************
+*/
 
 template <typename Dtype>
 void Net<Dtype>::ForwardDebugInfo(const int layer_id) {

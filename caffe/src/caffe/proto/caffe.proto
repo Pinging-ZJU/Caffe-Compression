@@ -91,6 +91,8 @@ message NetParameter {
   // Add buttons to set up vDNN & DeepCompression functions
   optional bool vdnn_setting = 11 [default = false];
   optional bool deepcompression_setting = 12 [default = false];
+  optional bool dynamic_setting = 13 [default = false];
+  optional bool backup_setting = 14 [default = false];
   // The layers that make up the net.  Each of their configurations, including
   // connectivity and behavior, is specified as a LayerParameter.
   repeated LayerParameter layer = 100;  // ID 100 so layers are printed last.
@@ -238,7 +240,8 @@ message SolverParameter {
     // Add buttons to set up vDNN & DeepCompression functions
   optional bool vdnn_setting = 67 [default = false];
   optional bool deepcompression_setting = 68 [default = false];
-
+  optional bool dynamic_setting = 69 [default = false];
+  optional bool backup_setting = 70 [default = false];
 
   // If false, don't save a snapshot after training finishes.
   optional bool snapshot_after_train = 28 [default = true];
@@ -999,7 +1002,8 @@ message RecurrentParameter {
   // Add buttons to set up vDNN & DeepCompression functions
   optional bool vdnn_setting = 7 [default = false];
   optional bool deepcompression_setting = 8 [default = false];
-
+  optional bool dynamic_setting = 9 [default = false];
+  optional bool backup_setting = 10 [default = false];
   // Whether to add as additional inputs (bottoms) the initial hidden state
   // blobs, and add as additional outputs (tops) the final timestep hidden state
   // blobs.  The number of additional bottom/top blobs required depends on the

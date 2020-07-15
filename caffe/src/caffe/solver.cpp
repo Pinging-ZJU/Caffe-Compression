@@ -193,7 +193,8 @@ void Solver<Dtype>::InitTestNets() {
     test_nets_[i]->set_debug_info(param_.debug_info());
     test_nets_[i]->set_sparsity_info(param_.sparsity_info());
     test_nets_[i]->set_vdnn(param_.vdnn_setting());
-    test_nets_[i]->set_deepcompression(param_.deepcompression_setting());
+    test_nets_[i]->set_dynamic(param_.dynamic_setting());
+    test_nets_[i]->set_backup(param_.backup_setting());
 
     for (int w_idx = 0; w_idx < param_.weights_size(); ++w_idx) {
       LoadNetWeights(test_nets_[i], param_.weights(w_idx));
@@ -243,6 +244,8 @@ void Solver<Dtype>::Step(int iters) {
     net_->set_sparsity_info(display && param_.sparsity_info());
     net_->set_vdnn(display && param_.vdnn_setting());
     net_->set_deepcompression(display && param_.deepcompression_setting());
+    net_->set_dynamic(display && param_.dynamic_setting());
+    net_->set_backup(display && param_.backup_setting());
 
 
     // accumulate the loss and gradient

@@ -73,7 +73,7 @@ class Net {
   void BackwardFromTo(int start, int end);
   void BackwardFrom(int start);
   void BackwardTo(int end);
-
+  double get_cur_time_ms();
   /**
    * @brief Reshape all layers from bottom to top.
    *
@@ -220,6 +220,8 @@ class Net {
 
   void set_vdnn(const bool value) { vdnn_setting_ = value; }
   void set_deepcompression(const bool value) { deepcompression_setting_ = value; }
+  void set_dynamic(const bool value) { dynamic_setting_ = value; }
+  void set_backup(const bool value) { backup_setting_ = value; }
   // Helpers for Init.
   /**
    * @brief Remove layers that the user specified should be excluded given the current
@@ -256,7 +258,20 @@ class Net {
     after_backward_.push_back(value);
   }
 
+  // record execute time
+  vector<vector<float> > execute_time_;
+  // record sparisity ratio
+  float sparisity_vec_[500];
+  bool judge_ref[500];
+
+  // ×°¾í»ý²ãµÄ±àºÅ
+  int conv_number[500];
+
+
  protected:
+
+
+
   // Helpers for Init.
   /// @brief Append a new top blob to the net.
   void AppendTop(const NetParameter& param, const int layer_id,
@@ -272,9 +287,23 @@ class Net {
 
   /// @brief Helper for displaying debug info in Forward.
   void ForwardDebugInfo(const int layer_id);
-
+  /*
+  ***************************************************************************
+  ***********************************CP-DIY**********************************
+  ***************************************************************************
+  */
   /// @brief Helper for recording Relu sparcity
   void ForwardReluRecord(const int layer_id, int& reluFlag);
+  /// @record sparsity of different layer
+  void SparsityRecord(const int layer_id);
+  /// @judge function
+  bool JudgeMode();
+ /*
+ ***************************************************************************
+ ***********************************CP-DIY**********************************
+ ***************************************************************************
+ */
+
   /// @brief Helper for displaying debug info in Backward.
   void BackwardDebugInfo(const int layer_id);
   /// @brief Helper for displaying debug info in Update.
@@ -319,6 +348,8 @@ class Net {
   /// The parameters in the network.
   vector<shared_ptr<Blob<Dtype> > > params_;
   vector<Blob<Dtype>*> learnable_params_;
+
+
   /**
    * The mapping from params_ -> learnable_params_: we have
    * learnable_param_ids_.size() == params_.size(),
@@ -340,6 +371,8 @@ class Net {
   bool sparsity_info_;
   bool vdnn_setting_;
   bool deepcompression_setting_;
+  bool dynamic_setting_;
+  bool backup_setting_;
   // Callbacks
   vector<Callback*> before_forward_;
   vector<Callback*> after_forward_;
