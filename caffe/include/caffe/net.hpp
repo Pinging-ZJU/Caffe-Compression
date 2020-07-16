@@ -263,7 +263,9 @@ class Net {
   // record sparisity ratio
   float sparisity_vec_[500];
   bool judge_ref[500];
-
+  // if use func , than the reward(+ or -)
+  float forward_reward[500];
+  float backward_reward[500];
   // ×°¾í»ý²ãµÄ±àºÅ
   int conv_number[500];
 

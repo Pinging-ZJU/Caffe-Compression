@@ -164,8 +164,8 @@ const void* SyncedMemory::async_cpu2gpu(int size_) {
 */
 const void* SyncedMemory::compression(int size_) {
     //check_device();
-    int gridsize = 64;
-    int blocksize = 128;
+    int gridsize = 290;
+    int blocksize = 32;
 #ifndef CPU_ONLY
 
     if (gpu_ptr_ != NULL && cpu_ptr_ == NULL) {

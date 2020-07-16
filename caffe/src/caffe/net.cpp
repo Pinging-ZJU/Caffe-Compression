@@ -563,10 +563,18 @@ Dtype Net<Dtype>::ForwardFromTo(int start, int end) {
         if (layer_names_[i][0] == 'c' && layer_names_[i][10] == 'n')
         {   
             t0 = get_cur_time_ms();
-            //printf("Layer name is :  %s, enter func\n", &layer_names_[i][0]);
-            if (deepcompression_setting_)
+            printf("Layer name is :  %s, Judge flag is %d\n", &layer_names_[i][0], judge_ref[i]);
+
+            if (deepcompression_setting_ && dynamic_setting_) {
+                if (judge_ref[i]) 
+                    bottom_vecs_[i][0]->compression();
+                else
+                    bottom_vecs_[i][0]->async_gpu2cpu();
+            }
+            if (deepcompression_setting_ && !dynamic_setting_) {
                 bottom_vecs_[i][0]->compression();
-            else
+            }
+            if(!deepcompression_setting_)
                 bottom_vecs_[i][0]->async_gpu2cpu();
         }
     }
@@ -689,10 +697,24 @@ void Net<Dtype>::BackwardFromTo(int start, int end) {
             {
                 t0 = get_cur_time_ms();
                 //printf("Layer name is : %d  %s  %s size is %d, enter func\n",i, &layer_names_[i][0], &layer_names_[i-1][0], bottom_vecs_[i - 1][0]->count()*4/1024/1024);
-                if (deepcompression_setting_)
+                /*if (deepcompression_setting_)
                     bottom_vecs_[i - 1][0]->decompression_cpu2gpu_asyc_transfer();
                 else
-                    bottom_vecs_[i-1][0]->async_cpu2gpu();
+                    bottom_vecs_[i-1][0]->async_cpu2gpu();*/
+
+                // 动态情况加入，判断如何操作
+                if (deepcompression_setting_ && dynamic_setting_) {
+                    if (judge_ref[i-1])
+                        bottom_vecs_[i - 1][0]->decompression_cpu2gpu_asyc_transfer();
+                    else
+                        bottom_vecs_[i - 1][0]->async_cpu2gpu();
+                }
+                if (deepcompression_setting_ && !dynamic_setting_) {
+                    bottom_vecs_[i - 1][0]->decompression_cpu2gpu_asyc_transfer();
+                }
+                if (!deepcompression_setting_)
+                    bottom_vecs_[i - 1][0]->async_cpu2gpu();
+
             }
         }
     }
@@ -746,8 +768,19 @@ void Net<Dtype>::BackwardFromTo(int start, int end) {
         if (i >= 1) {
             if (layer_names_[i - 1][0] == 'c' && layer_names_[i - 1][10] == 'n')
             {
-                if (deepcompression_setting_)
+                /*if (deepcompression_setting_)
+                    bottom_vecs_[i - 1][0]->decompression();*/
+
+                // 当deep情况默认全部解压缩，动态情况需要做一步判断
+                if (deepcompression_setting_ && dynamic_setting_) {
+                    if (judge_ref[i - 1])
+                        bottom_vecs_[i - 1][0]->decompression();
+                }
+                if (deepcompression_setting_ && !dynamic_setting_) {
                     bottom_vecs_[i - 1][0]->decompression();
+                }
+
+
             }
         }
     }
@@ -773,29 +806,73 @@ bool Net<Dtype>::JudgeMode() {
         // 当前卷积层的id
         int cur_layer_id = conv_number[index];
         float cur_layer_forward_time = execute_time_[cur_layer_id][0];
-        float cur_layer_backward_time = execute_time_[cur_layer_id][1];
+        // 需要卷积层+1层的后向传播时间，所以id+1
+        float cur_layer_backward_time = execute_time_[cur_layer_id+1][1];
         float cur_layer_sparsity = sparisity_vec_[cur_layer_id];
         float cur_layer_tensor_size = float(bottom_vecs_[cur_layer_id][0]->count());
         float cur_layer_tensor_size_mb = cur_layer_tensor_size * 4 / 1024 / 1024;
         float cur_layer_tensor_after_compressed_size_mb = cur_layer_tensor_size_mb * (1 - cur_layer_sparsity);
-        float deley_ori = ceil(cur_layer_tensor_size / 24);
-        float deley_compressed = ceil(cur_layer_tensor_after_compressed_size_mb / 24);
-        if (cur_layer_tensor_size / 12  < cur_layer_forward_time)
+        float deley_ori = ceil(cur_layer_tensor_size_mb / float(24));
+        float deley_compressed = ceil(cur_layer_tensor_after_compressed_size_mb / float(24));
+        float missoverlap_time;
+        //float compress_op_time = -0.195 * cur_layer_sparsity + 0.0317 * cur_layer_tensor_size_mb + 0.1244;
+        // 50%
+        float compress_op_time = 0.0258 * cur_layer_tensor_size_mb + 0.126;
+        float decompress_op_time = 0.063 * cur_layer_tensor_size_mb + 0.07 - 0.5 * cur_layer_tensor_size_mb / float(11.6);
+
+        // 正向传播
+        if (cur_layer_tensor_size_mb / float(11.6) + deley_ori < cur_layer_forward_time)
         {
-            judge_ref[cur_layer_id] = false;
-            printf("layer id %d  judge consequence is %d  \n", cur_layer_id, judge_ref[cur_layer_id]);
-            break;
+            forward_reward[cur_layer_id] = compress_op_time * float(-1);
+            //printf("enter 1 layer id %d forward_reward is %f pridict time is %f orginal time is %f \n", cur_layer_id, forward_reward[cur_layer_id], cur_layer_tensor_size_mb / float(12) + deley_ori, cur_layer_forward_time);
         }
         else {
-            // 压缩计算时间 + 压缩后数据转移时间 > 原数据转移时间 ->不转移
-            if (-0.195 * cur_layer_sparsity + 0.0317 * cur_layer_tensor_size_mb + 0.1244 + cur_layer_tensor_after_compressed_size_mb / 12 > cur_layer_tensor_size / 12 ) {
-                judge_ref[cur_layer_id] = false;
-                printf("layer id %d  judge consequence is %d  \n", cur_layer_id, judge_ref[cur_layer_id]);
-                break;
+            // 压缩计算时间 + (压缩后数据转移时间 - 原始计算时间) > 原数据转移时间 - 原始计算时间 - >不转移
+           missoverlap_time = cur_layer_tensor_after_compressed_size_mb / float(11.6) + deley_compressed - cur_layer_forward_time;
+           if (missoverlap_time < 0)
+               missoverlap_time = 0;
+           if (compress_op_time + missoverlap_time > cur_layer_tensor_size_mb / float(11.6) + deley_ori - cur_layer_forward_time){
+               // 使用compression方法需要耗费的额外时间 - 原方法耗费的额外时间（结果一定 > 0 ）
+               forward_reward[cur_layer_id] = (compress_op_time + missoverlap_time - cur_layer_tensor_size_mb / float(11.6) - deley_ori + cur_layer_forward_time) * float(-1);
+               //printf("enter 2 layer id %d  forward_reward is %f pridict time is %f orginal time is %f overlap time is %f \n", cur_layer_id, forward_reward[cur_layer_id], -0.195 * cur_layer_sparsity + 0.0317 * cur_layer_tensor_size_mb + 0.1244 + missoverlap_time, cur_layer_tensor_size_mb / float(12) + deley_ori - cur_layer_forward_time, missoverlap_time);
+               //printf("enter -2- com time is %f,  compressed data transfer time is %f , execu time is %f\n", -0.195 * cur_layer_sparsity + 0.0317 * cur_layer_tensor_size_mb + 0.1244, cur_layer_tensor_after_compressed_size_mb / float(12) + deley_compressed, cur_layer_forward_time);
+            }
+           else {
+               // 使用compression方法需要耗费的额外时间 - 原方法耗费的额外时间（结果一定 < 0， 乘-1后收益为正 ）
+               forward_reward[cur_layer_id] = (compress_op_time + missoverlap_time - cur_layer_tensor_size_mb / float(11.6) - deley_ori + cur_layer_forward_time) * float(-1);
+               //printf("enter 3 layer id %d  forward_reward is %f pridict time is %f orginal time is %f \n", cur_layer_id, forward_reward[cur_layer_id], -0.195 * cur_layer_sparsity + 0.0317 * cur_layer_tensor_size_mb + 0.1244 + missoverlap_time, cur_layer_tensor_size_mb / float(12) + deley_ori - cur_layer_forward_time);
+           }
+        }
+
+       
+        // 反向传播
+        if (cur_layer_tensor_size_mb / float(11.6) + deley_ori < cur_layer_backward_time) {
+            backward_reward[cur_layer_id] = decompress_op_time * float(-1);
+            //printf("DE enter 1 layer id %d forward_reward is %f pridict time is %f orginal time is %f \n", cur_layer_id, forward_reward[cur_layer_id], cur_layer_tensor_size_mb / float(12) + deley_ori, cur_layer_backward_time);
+
+        }
+        else {
+            missoverlap_time = cur_layer_tensor_after_compressed_size_mb / float(11.6) + deley_compressed - cur_layer_backward_time;
+            if (missoverlap_time < 0)
+                missoverlap_time = 0;
+            if (decompress_op_time + missoverlap_time > cur_layer_tensor_size_mb / float(11.6) + deley_ori - cur_layer_backward_time) {
+                backward_reward[cur_layer_id] = (decompress_op_time + missoverlap_time - cur_layer_tensor_size_mb / float(11.6) - deley_ori + cur_layer_backward_time) * float(-1);
+                //printf("DE enter 2 layer id %d  forward_reward is %f pridict time is %f orginal time is %f overlap time is %f \n", cur_layer_id, backward_reward[cur_layer_id], decompress_op_time + missoverlap_time, cur_layer_tensor_size_mb / float(12) + deley_ori - cur_layer_backward_time, missoverlap_time);
+                //printf("DE enter -2- com time is %f,  compressed data transfer time is %f , execu time is %f\n", decompress_op_time, cur_layer_tensor_after_compressed_size_mb / float(12) + deley_compressed, cur_layer_backward_time);
+
+            }
+            else {
+                backward_reward[cur_layer_id] = (decompress_op_time + missoverlap_time - cur_layer_tensor_size_mb / float(11.6) - deley_ori + cur_layer_backward_time) * float(-1);
+                //printf("DE enter 2 layer id %d  forward_reward is %f pridict time is %f orginal time is %f overlap time is %f \n", cur_layer_id, backward_reward[cur_layer_id], decompress_op_time + missoverlap_time, cur_layer_tensor_size_mb / float(12) + deley_ori - cur_layer_backward_time, missoverlap_time);
             }
         }
-        judge_ref[cur_layer_id] = true;
-        printf("layer id %d  judge consequence is %d  \n", cur_layer_id, judge_ref[cur_layer_id]);
+    
+        if (forward_reward[cur_layer_id] + backward_reward[cur_layer_id] > 0)
+            judge_ref[cur_layer_id] = true;
+        else
+            judge_ref[cur_layer_id] = false;
+        //printf("SParsity is %f \n", cur_layer_sparsity);
+    
     }
 }
 
